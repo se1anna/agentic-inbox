@@ -5,44 +5,13 @@
 /**
  * Shared email helpers to eliminate duplication across API routes, MCP, and agent.
  *
- * Includes: DO stub helpers, sender validation, message-ID generation,
- * threading, HTML utilities, and tool-logic (getFullEmail / getFullThread).
+ * Includes: sender validation, message-ID generation,
+ * threading, HTML utilities, and D1 email/thread fetching.
  */
-import type { MailboxDO } from "../durableObject";
+import type { D1MailboxService } from "../db/d1-queries";
 import type { EmailFull } from "./schemas";
 import { Folders } from "../../shared/folders";
-import type { Env } from "../types";
 import { formatQuotedDate } from "../../shared/dates";
-
-// ── DO Stub ────────────────────────────────────────────────────────
-
-/**
- * Resolve a MailboxDO stub from a mailbox email address.
- * Replaces the repeated 3-line ns.idFromName / ns.get pattern.
- */
-export function getMailboxStub(
-	env: Env,
-	mailboxId: string,
-): DurableObjectStub<MailboxDO> {
-	const ns = env.MAILBOX;
-	const id = ns.idFromName(mailboxId);
-	return ns.get(id);
-}
-
-// ── Mailbox Listing ────────────────────────────────────────────────
-
-/**
- * List all mailboxes from R2 bucket metadata.
- */
-export async function listMailboxes(
-	bucket: R2Bucket,
-): Promise<{ id: string; email: string }[]> {
-	const list = await bucket.list({ prefix: "mailboxes/" });
-	return list.objects.map((obj) => {
-		const id = obj.key.replace("mailboxes/", "").replace(".json", "");
-		return { id, email: id };
-	});
-}
 
 // ── Sender Validation ──────────────────────────────────────────────
 
@@ -96,7 +65,7 @@ export function generateMessageId(fromDomain: string): {
 /**
  * Build the References chain and In-Reply-To from an original email.
  */
-export function buildReferencesChain(original: EmailFull): {
+export function buildReferencesChain(original: EmailFull | any): {
 	originalMsgId: string;
 	references: string[];
 	threadId: string;
@@ -137,11 +106,12 @@ export function buildThreadingHeaders(
  * Used by reply/forward routes to avoid threading against the draft itself.
  */
 export async function resolveOriginalEmail(
-	stub: DurableObjectStub<MailboxDO>,
-	email: EmailFull,
-): Promise<EmailFull> {
-	if (email.folder_id === Folders.DRAFT && email.in_reply_to) {
-		const realOriginal = (await stub.getEmail(email.in_reply_to)) as EmailFull | null;
+	mailboxService: D1MailboxService,
+	mailboxId: string,
+	email: EmailFull | any,
+): Promise<EmailFull | any> {
+	if ((email.folder_id === Folders.DRAFT || email.folder_id === "draft") && email.in_reply_to) {
+		const realOriginal = await mailboxService.getEmail(mailboxId, email.in_reply_to);
 		if (realOriginal) return realOriginal;
 	}
 	return email;
@@ -165,8 +135,6 @@ export function escapeHtml(text: string): string {
 
 /**
  * Convert plain text to a simple HTML block with preserved whitespace.
- * Uses both `white-space:pre-wrap` (modern clients) and `<br>` tags
- * (clients that strip inline styles, e.g. Outlook) as a belt-and-suspenders approach.
  */
 export function textToHtml(text: string): string {
 	if (!text) return "";
@@ -189,10 +157,6 @@ export function stripHtmlToText(html: string): string {
 		.trim();
 }
 
-/**
- * Format a date string for use in quoted reply blocks.
- * @deprecated Use `formatQuotedDate` from `shared/dates` directly.
- */
 export const formatEmailDate = formatQuotedDate;
 
 /**
@@ -209,55 +173,37 @@ export function buildQuotedReplyBlock(original: {
 	const originalSender = escapeHtml(original.sender || "unknown");
 	const originalDate = escapeHtml(formatEmailDate(original.date || ""));
 
-	// Sanitize the body to plain text to prevent stored XSS.
-	// The original HTML renders safely in the sandboxed iframe, but quoted
-	// reply blocks are injected into the compose editor and outgoing emails
-	// where raw HTML would execute. Convert to escaped plain text instead.
 	const plainBody = stripHtmlToText(original.body);
 	const bodyToQuote = escapeHtml(plainBody).replace(/\n/g, "<br>");
 
 	return `<br><blockquote style="border-left: 2px solid #ccc; margin: 0; padding-left: 1em; color: #666;">On ${originalDate}, ${originalSender} wrote:<br><br>${bodyToQuote}</blockquote>`;
 }
 
-// ── Tool Logic (getFullEmail / getFullThread) ──────────────────────
+// ── D1 Email and Thread Helpers ────────────────────────────────────
 
-type MailboxThreadReaderStub = {
-	getThreadEmails: (threadId: string) => Promise<EmailFull[]>;
-};
-
-/**
- * Fetch a single email and return it with both HTML and plain-text body.
- * Returns null if the email is not found.
- */
 export async function getFullEmail(
-	stub: DurableObjectStub<MailboxDO>,
+	mailboxService: D1MailboxService,
+	mailboxId: string,
 	emailId: string,
 ) {
-	const email = (await stub.getEmail(emailId)) as EmailFull | null;
+	const email = await mailboxService.getEmail(mailboxId, emailId);
 	if (!email) return null;
 
 	const textBody = email.body ? stripHtmlToText(email.body) : "";
 	return { ...email, body_text: textBody, body_html: email.body };
 }
 
-/**
- * Fetch all emails in a thread with full bodies in a single DO call.
- * Uses `getThreadEmails` which runs 2 SQL queries (emails + attachments)
- * instead of the previous N+1 pattern (1 list query + N getEmail calls).
- */
 export async function getFullThread(
-	stub: DurableObjectStub<MailboxDO>,
+	mailboxService: D1MailboxService,
+	mailboxId: string,
 	threadId: string,
 ) {
-	const threadStub = stub as unknown as MailboxThreadReaderStub;
-	const emails = await threadStub.getThreadEmails(threadId);
-
+	const emails = await mailboxService.getThreadEmails(mailboxId, threadId);
 	const enriched = emails.map((email) => {
 		const textBody = email.body ? stripHtmlToText(email.body) : "";
 		return { ...email, body_text: textBody };
 	});
 
-	// Already sorted ASC by the DO query, but ensure consistency
 	enriched.sort(
 		(a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
 	);

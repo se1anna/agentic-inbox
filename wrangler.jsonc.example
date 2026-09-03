@@ -1,0 +1,58 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "agentic-inbox",
+	"compatibility_date": "2025-11-28",
+	"main": "./workers/app.ts",
+	"observability": {
+		"enabled": true
+	},
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"vars": {
+		// Comma-separated domains permitted for email routing & mailbox creation
+		"DOMAINS": "example.com",
+
+		// OAuth 2.0 / OIDC Identity Provider Configuration
+		"OAUTH_CLIENT_ID": "YOUR_OAUTH_CLIENT_ID",
+		"OAUTH_CLIENT_SECRET": "YOUR_OAUTH_CLIENT_SECRET",
+		"OAUTH_AUTH_URL": "https://auth.example.com/oauth/authorize",
+		"OAUTH_TOKEN_URL": "https://auth.example.com/oauth/token",
+		"OAUTH_USERINFO_URL": "https://auth.example.com/oauth/userinfo",
+		"OAUTH_SCOPES": "openid profile email roles",
+
+		// Role claim attribute in ID token or UserInfo payload (optional, defaults to checking 'roles', 'role', 'groups')
+		// "OAUTH_ADMIN_ROLE_CLAIM": "roles",
+
+		// Value required for Admin access (case-insensitive, e.g. "Admin" or "administrator")
+		"OAUTH_ADMIN_ROLE_VALUE": "Admin"
+	},
+	"send_email": [
+		{
+			"name": "EMAIL",
+			"remote": true
+		}
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "mail-db",
+			"database_id": "YOUR_D1_DATABASE_UUID_HERE",
+			"migrations_dir": "migrations"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "BUCKET",
+			"bucket_name": "agentic-inbox-attachments",
+			"preview_bucket_name": "agentic-inbox-attachments"
+		}
+	],
+	// Optional: Service binding for Cloudflare Worker-to-Worker same-zone subrequests
+	"services": [
+		// {
+		// 	"binding": "OAUTH_SERVICE",
+		// 	"service": "your-auth-worker-name"
+		// }
+	]
+}

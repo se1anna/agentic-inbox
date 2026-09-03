@@ -5,7 +5,6 @@
 import type { Context } from "hono";
 import { sendEmail } from "../email-sender";
 import { storeAttachments } from "../lib/attachments";
-import type { EmailFull } from "../lib/schemas";
 import {
 	validateSender,
 	SenderValidationError,
@@ -16,10 +15,9 @@ import {
 } from "../lib/email-helpers";
 import { SendEmailRequestSchema } from "../lib/schemas";
 import { Folders } from "../../shared/folders";
-import type { MailboxContext } from "../lib/mailbox";
+import type { AuthContext } from "../auth/middleware";
 
-type AppContext = Context<MailboxContext>;
-type RateLimitStub = { checkSendRateLimit: () => Promise<string | null> };
+type AppContext = Context<AuthContext>;
 
 export async function handleReplyEmail(c: AppContext) {
 	const mailboxId = c.req.param("mailboxId") ?? "";
@@ -27,14 +25,14 @@ export async function handleReplyEmail(c: AppContext) {
 	const body = SendEmailRequestSchema.parse(await c.req.json());
 	const { to, cc, bcc, from, subject, html, text, attachments } = body;
 
-	const stub = c.var.mailboxStub;
-	const rawOriginal = (await stub.getEmail(id)) as EmailFull | null;
+	const mailboxService = c.var.mailboxService;
+	const rawOriginal = await mailboxService.getEmail(mailboxId, id);
 
 	if (!rawOriginal) {
 		return c.json({ error: "Original email not found" }, 404);
 	}
 
-	const originalEmail = await resolveOriginalEmail(stub, rawOriginal);
+	const originalEmail = await resolveOriginalEmail(mailboxService, mailboxId, rawOriginal);
 	const { originalMsgId, references, threadId: thread_id } = buildReferencesChain(originalEmail);
 
 	let toStr: string, fromEmail: string, fromDomain: string;
@@ -47,15 +45,15 @@ export async function handleReplyEmail(c: AppContext) {
 
 	const { messageId, outgoingMessageId } = generateMessageId(fromDomain);
 
-	const rateLimitError = await (stub as unknown as RateLimitStub)
-		.checkSendRateLimit();
+	const rateLimitError = await mailboxService.checkSendRateLimit(mailboxId);
 	if (rateLimitError) {
 		return c.json({ error: rateLimitError }, 429);
 	}
 
 	const attachmentData = await storeAttachments(c.env.BUCKET, messageId, attachments);
 
-	await stub.createEmail(
+	await mailboxService.createEmail(
+		mailboxId,
 		Folders.SENT,
 		{
 			id: messageId,
@@ -85,7 +83,7 @@ export async function handleReplyEmail(c: AppContext) {
 		attachmentData,
 	);
 
-	await stub.markThreadRead(thread_id);
+	await mailboxService.markThreadRead(mailboxId, thread_id);
 
 	c.executionCtx.waitUntil(
 		sendEmail(c.env.EMAIL, {
@@ -118,14 +116,12 @@ export async function handleForwardEmail(c: AppContext) {
 	const body = SendEmailRequestSchema.parse(await c.req.json());
 	const { to, cc, bcc, from, subject, html, text, attachments } = body;
 
-	const stub = c.var.mailboxStub;
-	const rawOriginal = (await stub.getEmail(id)) as EmailFull | null;
+	const mailboxService = c.var.mailboxService;
+	const rawOriginal = await mailboxService.getEmail(mailboxId, id);
 
 	if (!rawOriginal) {
 		return c.json({ error: "Original email not found" }, 404);
 	}
-
-	await resolveOriginalEmail(stub, rawOriginal);
 
 	let toStr: string, fromEmail: string, fromDomain: string;
 	try {
@@ -137,15 +133,15 @@ export async function handleForwardEmail(c: AppContext) {
 
 	const { messageId, outgoingMessageId } = generateMessageId(fromDomain);
 
-	const rateLimitError = await (stub as unknown as RateLimitStub)
-		.checkSendRateLimit();
+	const rateLimitError = await mailboxService.checkSendRateLimit(mailboxId);
 	if (rateLimitError) {
 		return c.json({ error: rateLimitError }, 429);
 	}
 
 	const attachmentData = await storeAttachments(c.env.BUCKET, messageId, attachments);
 
-	await stub.createEmail(
+	await mailboxService.createEmail(
+		mailboxId,
 		Folders.SENT,
 		{
 			id: messageId,

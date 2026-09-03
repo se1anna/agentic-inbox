@@ -109,19 +109,23 @@ export function HydrateFallback() {
 	);
 }
 
+import { I18nProvider } from "~/i18n";
+
 export default function App() {
 	// Use useState to ensure each SSR request gets a fresh client while the
 	// browser reuses the same singleton across navigations.
 	const [queryClient] = useState(getQueryClient);
 	return (
 		<QueryClientProvider client={queryClient}>
-			<LinkProvider component={KumoLink}>
-				<TooltipProvider>
-					<Toasty>
-						<Outlet />
-					</Toasty>
-				</TooltipProvider>
-			</LinkProvider>
+			<I18nProvider>
+				<LinkProvider component={KumoLink}>
+					<TooltipProvider>
+						<Toasty>
+							<Outlet />
+						</Toasty>
+					</TooltipProvider>
+				</LinkProvider>
+			</I18nProvider>
 		</QueryClientProvider>
 	);
 }

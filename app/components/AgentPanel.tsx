@@ -15,318 +15,104 @@ import {
 	ArrowBendUpLeftIcon,
 	WrenchIcon,
 	CheckCircleIcon,
-	StopIcon,
-	PencilSimpleIcon,
+	GearSixIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router";
+import { useParams, useNavigate } from "react-router";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useUIStore } from "~/hooks/useUIStore";
-import type { UIMessage } from "ai";
+import api from "~/services/api";
+import { useI18n } from "~/i18n";
 
-const TOOL_LABELS: Record<string, { label: string; icon: React.ReactNode }> = {
-	list_emails: {
-		label: "Fetching emails",
-		icon: <EnvelopeSimpleIcon size={14} weight="bold" />,
-	},
-	get_email: {
-		label: "Reading email",
-		icon: <EyeIcon size={14} weight="bold" />,
-	},
-	get_thread: {
-		label: "Loading thread",
-		icon: <ArrowBendUpLeftIcon size={14} weight="bold" />,
-	},
-	search_emails: {
-		label: "Searching",
-		icon: <MagnifyingGlassIcon size={14} weight="bold" />,
-	},
-	draft_email: {
-		label: "Drafting email",
-		icon: <PaperPlaneTiltIcon size={14} weight="bold" />,
-	},
-	draft_reply: {
-		label: "Drafting reply",
-		icon: <PaperPlaneTiltIcon size={14} weight="bold" />,
-	},
-	discard_draft: {
-		label: "Discarding draft",
-		icon: <TrashIcon size={14} weight="bold" />,
-	},
-	mark_email_read: {
-		label: "Updating status",
-		icon: <CheckCircleIcon size={14} weight="bold" />,
-	},
-	move_email: {
-		label: "Moving email",
-		icon: <EnvelopeSimpleIcon size={14} weight="bold" />,
-	},
-};
-
-function ToolCallBadge({
-	toolName,
-	state,
-}: {
-	toolName: string;
-	state: string;
-}) {
-	const info = TOOL_LABELS[toolName] || {
-		label: toolName,
-		icon: <WrenchIcon size={14} weight="bold" />,
-	};
-	const isDone =
-		state === "output-available" ||
-		state === "result" ||
-		state === "output-error";
-
-	return (
-		<div className="flex items-center gap-1.5 py-1 px-2 rounded bg-kumo-fill/50 text-xs">
-			<span className="text-kumo-brand">{info.icon}</span>
-			<span className="text-kumo-strong">{info.label}</span>
-			{isDone ? (
-				<CheckCircleIcon
-					size={12}
-					weight="fill"
-					className="text-kumo-success ml-auto"
-				/>
-			) : (
-				<Loader size="sm" className="ml-auto" />
-			)}
-		</div>
-	);
+interface ChatMessage {
+	id: string;
+	role: "user" | "assistant" | "tool";
+	content: string;
+	tool_calls?: any[];
+	name?: string;
 }
 
-function getToolNameFromPart(part: UIMessage["parts"][number]): string | null {
-	if (part.type === "dynamic-tool") return (part as any).toolName ?? null;
-	if (part.type.startsWith("tool-")) return part.type.replace("tool-", "");
-	return null;
-}
-
-function hasDraftReplyTool(message: UIMessage): boolean {
-	return message.parts.some((part) => {
-		const toolName = getToolNameFromPart(part);
-		return toolName === "draft_reply";
-	});
-}
-
-function DraftActions({
-	onEdit,
-	disabled,
-}: {
-	onEdit: () => void;
-	disabled: boolean;
-}) {
-	return (
-		<div className="flex gap-1.5 mt-1">
-			<Button
-				variant="primary"
-				size="sm"
-				icon={<PencilSimpleIcon size={14} />}
-				onClick={onEdit}
-				disabled={disabled}
-			>
-				Edit & send in composer
-			</Button>
-		</div>
-	);
-}
-
-function MessageBubble({
-	message,
-	onAction,
-	isStreaming,
-}: {
-	message: UIMessage;
-	onAction?: (action: string) => void;
-	isStreaming: boolean;
-}) {
-	const isUser = message.role === "user";
-
-	return (
-		<div
-			className={`flex gap-2 ${isUser ? "flex-row-reverse" : "flex-row"}`}
-		>
-			<div
-				className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
-					isUser
-						? "bg-kumo-brand text-kumo-inverse"
-						: "bg-kumo-fill text-kumo-default"
-				}`}
-			>
-				{isUser ? (
-					<UserIcon size={12} weight="bold" />
-				) : (
-					<RobotIcon size={12} weight="bold" />
-				)}
-			</div>
-			<div
-				className={`flex flex-col gap-1 max-w-[85%] min-w-0 ${
-					isUser ? "items-end" : "items-start"
-				}`}
-			>
-				{message.parts.map((part, i) => {
-					const key = `${message.id}-part-${i}`;
-					if (part.type === "text" && part.text.trim()) {
-						return (
-							<div
-								key={key}
-								className={`rounded-lg px-3 py-2 text-[13px] leading-relaxed break-words overflow-wrap-anywhere ${
-									isUser
-										? "bg-kumo-brand text-kumo-inverse rounded-br-sm"
-										: "bg-kumo-elevated text-kumo-default border border-kumo-line rounded-bl-sm overflow-hidden"
-								}`}
-							>
-								{isUser ? (
-									part.text
-								) : (
-									<Markdown
-										remarkPlugins={[remarkGfm]}
-										components={{
-											a: ({ href, children }) => (
-												<a
-													href={href}
-													target="_blank"
-													rel="noopener noreferrer"
-													style={{
-														color: "var(--color-link)",
-														textDecoration: "underline",
-													}}
-												>
-													{children}
-												</a>
-											),
-											p: ({ children }) => (
-												<p className="mb-2 last:mb-0">
-													{children}
-												</p>
-											),
-											strong: ({ children }) => (
-												<strong className="font-semibold">
-													{children}
-												</strong>
-											),
-											ul: ({ children }) => (
-												<ul className="list-disc pl-4 mb-2 last:mb-0 space-y-0.5">
-													{children}
-												</ul>
-											),
-											ol: ({ children }) => (
-												<ol className="list-decimal pl-4 mb-2 last:mb-0 space-y-0.5">
-													{children}
-												</ol>
-											),
-											li: ({ children }) => (
-												<li>{children}</li>
-											),
-											h1: ({ children }) => (
-												<h3 className="font-semibold text-sm mb-1">
-													{children}
-												</h3>
-											),
-											h2: ({ children }) => (
-												<h4 className="font-semibold text-[13px] mb-1">
-													{children}
-												</h4>
-											),
-											h3: ({ children }) => (
-												<h5 className="font-semibold text-[13px] mb-0.5">
-													{children}
-												</h5>
-											),
-											code: ({ children }) => (
-												<code className="bg-kumo-fill px-1 py-0.5 rounded text-[12px]">
-													{children}
-												</code>
-											),
-											table: ({ children }) => (
-												<div className="overflow-x-auto my-2">
-													<table className="w-full text-xs border-collapse">
-														{children}
-													</table>
-												</div>
-											),
-											thead: ({ children }) => (
-												<thead className="border-b border-kumo-line bg-kumo-fill/30">
-													{children}
-												</thead>
-											),
-											th: ({ children }) => (
-												<th className="text-left px-2 py-1 font-semibold text-kumo-strong">
-													{children}
-												</th>
-											),
-											td: ({ children }) => (
-												<td className="px-2 py-1 border-b border-kumo-line/50">
-													{children}
-												</td>
-											),
-										}}
-									>
-										{part.text}
-									</Markdown>
-								)}
-							</div>
-						);
-					}
-					const toolName = getToolNameFromPart(part);
-					if (toolName) {
-						return (
-							<ToolCallBadge
-								key={key}
-								toolName={toolName}
-								state={(part as any).state ?? "running"}
-							/>
-						);
-					}
-					return null;
-				})}
-				{/* Show action buttons for draft replies */}
-				{!isUser && hasDraftReplyTool(message) && onAction && (
-					<DraftActions
-						onEdit={() => onAction("edit")}
-						disabled={isStreaming}
-					/>
-				)}
-			</div>
-		</div>
-	);
-}
-
-function AgentChatConnected({
-	mailboxId,
-	useAgent,
-	useAgentChat,
-}: {
-	mailboxId: string;
-	useAgent: typeof import("agents/react").useAgent;
-	useAgentChat: typeof import("@cloudflare/ai-chat/react").useAgentChat;
-}) {
+export default function AgentPanel() {
+	const { mailboxId } = useParams<{ mailboxId: string }>();
+	const navigate = useNavigate();
+	const { t } = useI18n();
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const inputRef = useRef<HTMLTextAreaElement>(null);
 	const [inputValue, setInputValue] = useState("");
-	const { startCompose } = useUIStore();
+	const [isLoading, setIsLoading] = useState(false);
+	const [messages, setMessages] = useState<ChatMessage[]>([]);
 
-	const agent = useAgent({ agent: "EmailAgent", name: mailboxId });
-	const { messages, sendMessage, status, setMessages, stop } =
-		useAgentChat({ agent });
-	const isStreaming = status === "streaming" || status === "submitted";
+	// Load chat history from localStorage per mailbox
+	useEffect(() => {
+		if (!mailboxId) return;
+		try {
+			const saved = localStorage.getItem(`agent_chat_${mailboxId}`);
+			if (saved) {
+				setMessages(JSON.parse(saved));
+			} else {
+				setMessages([]);
+			}
+		} catch {}
+	}, [mailboxId]);
+
+	// Save chat history
+	useEffect(() => {
+		if (!mailboxId || messages.length === 0) return;
+		try {
+			localStorage.setItem(`agent_chat_${mailboxId}`, JSON.stringify(messages));
+		} catch {}
+	}, [mailboxId, messages]);
 
 	useEffect(() => {
 		const el = scrollRef.current;
 		if (el) el.scrollTop = el.scrollHeight;
-	}, [messages]);
+	}, [messages, isLoading]);
 
-	useEffect(() => {
-		inputRef.current?.focus();
-	}, []);
+	const handleSend = async (textToSend?: string) => {
+		const text = (textToSend || inputValue).trim();
+		if (!text || !mailboxId || isLoading) return;
 
-	const handleSend = () => {
-		const text = inputValue.trim();
-		if (!text || isStreaming) return;
 		setInputValue("");
-		sendMessage({ text });
 		if (inputRef.current) inputRef.current.style.height = "auto";
+
+		const userMsg: ChatMessage = {
+			id: crypto.randomUUID(),
+			role: "user",
+			content: text,
+		};
+
+		const nextHistory = [...messages, userMsg];
+		setMessages(nextHistory);
+		setIsLoading(true);
+
+		try {
+			const payload = nextHistory.map((m) => ({
+				role: m.role,
+				content: m.content,
+			}));
+
+			const res = await api.agentChat(mailboxId, payload);
+			if (res.messages && res.messages.length > 0) {
+				const formatted = res.messages.map((m: any, idx: number) => ({
+					id: `msg-${Date.now()}-${idx}`,
+					role: m.role,
+					content: m.content || "",
+				}));
+				setMessages(formatted);
+			}
+		} catch (err: any) {
+			setMessages((prev) => [
+				...prev,
+				{
+					id: crypto.randomUUID(),
+					role: "assistant",
+					content: `⚠️ Failed to get response from AI provider: ${err?.message || err}`,
+				},
+			]);
+		} finally {
+			setIsLoading(false);
+		}
 	};
 
 	const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -336,67 +122,76 @@ function AgentChatConnected({
 		}
 	};
 
+	const handleClearChat = () => {
+		if (window.confirm(t("agent.clearHistory"))) {
+			setMessages([]);
+			if (mailboxId) {
+				localStorage.removeItem(`agent_chat_${mailboxId}`);
+			}
+		}
+	};
+
 	const suggestedPrompts = [
-		"Show me the latest inbox emails",
-		"Any unread emails?",
-		"Draft a response to the latest email",
+		t("agent.suggestLatest"),
+		t("agent.suggestUnread"),
+		t("agent.suggestDraft"),
 	];
 
 	return (
-		<div className="flex flex-col h-full">
+		<div className="flex flex-col h-full bg-kumo-base">
 			{/* Header */}
-			<div className="flex items-center justify-between px-3 py-1.5 border-b border-kumo-line shrink-0">
+			<div className="flex items-center justify-between px-3 py-2 border-b border-kumo-line shrink-0">
 				<div className="flex items-center gap-2">
-					<Badge variant="beta">AI</Badge>
-					<span className="text-xs text-kumo-subtle">
-						Email Agent
-					</span>
+					<Badge variant="primary">{t("agent.badge")}</Badge>
+					<span className="text-xs font-medium text-kumo-default">{t("agent.title")}</span>
 				</div>
 				<div className="flex items-center gap-1">
-					{isStreaming && <Loader size="sm" />}
+					<Tooltip content={t("settings.aiTitle")} asChild>
+						<Button
+							variant="ghost"
+							shape="square"
+							size="sm"
+							icon={<GearSixIcon size={15} />}
+							onClick={() => navigate(`/mailbox/${mailboxId}/settings`)}
+							aria-label={t("nav.settings")}
+						/>
+					</Tooltip>
 					{messages.length > 0 && (
-						<Tooltip content="Clear chat" asChild>
+						<Tooltip content={t("agent.clearChat")} asChild>
 							<Button
 								variant="ghost"
 								shape="square"
 								size="sm"
-								icon={<TrashIcon size={14} />}
-								onClick={() => {
-									if (window.confirm("Clear chat history?")) {
-										setMessages([]);
-									}
-								}}
-								aria-label="Clear chat"
+								icon={<TrashIcon size={15} />}
+								onClick={handleClearChat}
+								aria-label={t("agent.clearChat")}
 							/>
 						</Tooltip>
 					)}
 				</div>
 			</div>
 
-			{/* Messages */}
-			<div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-4">
+			{/* Messages View */}
+			<div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-4 space-y-3">
 				{messages.length === 0 ? (
-					<div className="flex flex-col items-center justify-center h-full gap-4">
-						<div className="flex h-12 w-12 items-center justify-center rounded-xl bg-kumo-brand/10">
-							<RobotIcon
-								size={24}
-								weight="duotone"
-								className="text-kumo-brand"
-							/>
+					<div className="flex flex-col items-center justify-center h-full gap-4 text-center px-4">
+						<div className="flex h-12 w-12 items-center justify-center rounded-xl bg-kumo-fill text-kumo-default shadow-sm">
+							<RobotIcon size={24} weight="duotone" />
 						</div>
-						<p className="text-xs text-kumo-subtle text-center leading-relaxed px-4">
-							I can read emails, search conversations, and draft
-							replies.
-						</p>
-						<div className="flex flex-col gap-1.5 w-full">
+						<div>
+							<h4 className="text-sm font-semibold text-kumo-default">{t("agent.title")}</h4>
+							<p className="text-xs text-kumo-subtle mt-1 leading-relaxed">
+								{t("agent.subtitle")}
+							</p>
+						</div>
+
+						<div className="flex flex-col gap-1.5 w-full pt-2">
 							{suggestedPrompts.map((prompt) => (
 								<button
 									key={prompt}
 									type="button"
-									onClick={() =>
-										sendMessage({ text: prompt })
-									}
-									className="text-left px-3 py-2 rounded-lg border border-kumo-line text-xs text-kumo-strong hover:bg-kumo-tint hover:border-kumo-fill-hover transition-colors cursor-pointer bg-transparent"
+									onClick={() => handleSend(prompt)}
+									className="text-left px-3 py-2 rounded-lg border border-kumo-line text-xs text-kumo-strong hover:bg-kumo-tint transition-colors cursor-pointer bg-transparent"
 								>
 									{prompt}
 								</button>
@@ -404,171 +199,106 @@ function AgentChatConnected({
 						</div>
 					</div>
 				) : (
-					<div className="flex flex-col gap-3">
-						{messages.map((msg) => (
-							<MessageBubble
+					messages.map((msg) => {
+						const isUser = msg.role === "user";
+						return (
+							<div
 								key={msg.id}
-								message={msg}
-								isStreaming={isStreaming}
-							onAction={(action) => {
-								if (action === "edit") {
-										// Extract draft data from the draft_reply tool result
-										let draftData: {
-											to?: string;
-											subject?: string;
-											body?: string;
-											id?: string;
-										} | null = null;
-										for (const part of msg.parts) {
-											if (
-												(part as any).toolName === "draft_reply" &&
-												(part as any).result
-											) {
-												draftData = (part as any).result;
-												break;
-											}
-										}
-										if (draftData) {
-											const draftEmail = {
-												id: draftData.id || "",
-												subject: draftData.subject || "",
-												sender: mailboxId,
-												recipient: draftData.to || "",
-												date: new Date().toISOString(),
-												read: true,
-												starred: false,
-												body: draftData.body || "",
-											};
-											startCompose({
-												mode: "reply",
-												originalEmail: null,
-												draftEmail,
-											});
-										} else {
-											sendMessage({
-												text: "Let me edit this draft first. Show me what you have so I can modify it.",
-											});
-										}
-									}
-								}}
-							/>
-						))}
-						{isStreaming && (
-							<div className="flex gap-2">
-								<div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-kumo-fill text-kumo-default">
-									<RobotIcon size={12} weight="bold" />
+								className={`flex gap-2 ${isUser ? "flex-row-reverse" : "flex-row"}`}
+							>
+								<div
+									className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+										isUser
+											? "bg-kumo-brand text-kumo-inverse"
+											: "bg-kumo-fill text-kumo-default"
+									}`}
+								>
+									{isUser ? <UserIcon size={12} weight="bold" /> : <RobotIcon size={12} weight="bold" />}
 								</div>
-								<div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-kumo-elevated border border-kumo-line rounded-bl-sm">
-									<Loader size="sm" />
-									<span className="text-xs text-kumo-subtle">
-										Thinking...
-									</span>
+
+								<div
+									className={`flex flex-col gap-1 max-w-[85%] min-w-0 ${
+										isUser ? "items-end" : "items-start"
+									}`}
+								>
+									<div
+										className={`rounded-lg px-3 py-2 text-[13px] leading-relaxed break-words overflow-hidden ${
+											isUser
+												? "bg-kumo-brand text-kumo-inverse rounded-br-sm"
+												: "bg-kumo-elevated text-kumo-default border border-kumo-line rounded-bl-sm"
+										}`}
+									>
+										{isUser ? (
+											msg.content
+										) : (
+											<Markdown
+												remarkPlugins={[remarkGfm]}
+												components={{
+													a: ({ href, children }) => (
+														<a
+															href={href}
+															target="_blank"
+															rel="noopener noreferrer"
+															className="text-kumo-brand underline"
+														>
+															{children}
+														</a>
+													),
+													p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+													strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+													ul: ({ children }) => <ul className="list-disc pl-4 mb-2 last:mb-0 space-y-0.5">{children}</ul>,
+													ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 last:mb-0 space-y-0.5">{children}</ol>,
+													li: ({ children }) => <li>{children}</li>,
+													code: ({ children }) => <code className="bg-kumo-fill px-1 py-0.5 rounded text-[12px]">{children}</code>,
+												}}
+											>
+												{msg.content}
+											</Markdown>
+										)}
+									</div>
 								</div>
 							</div>
-						)}
+						);
+					})
+				)}
+
+				{isLoading && (
+					<div className="flex gap-2">
+						<div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-kumo-fill text-kumo-default">
+							<RobotIcon size={12} weight="bold" />
+						</div>
+						<div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-kumo-elevated border border-kumo-line rounded-bl-sm">
+							<Loader size="sm" />
+							<span className="text-xs text-kumo-subtle">{t("agent.thinking")}</span>
+						</div>
 					</div>
 				)}
 			</div>
 
-			{/* Input */}
+			{/* Input Box */}
 			<div className="shrink-0 border-t border-kumo-line px-3 py-2">
-				{isStreaming ? (
-					<div className="flex justify-center">
-						<Button
-							variant="secondary"
-							size="sm"
-							icon={<StopIcon size={14} weight="fill" />}
-							onClick={() => stop()}
-						>
-							Stop generating
-						</Button>
-					</div>
-				) : (
-					<div className="flex items-end gap-1.5">
-						<textarea
-							ref={inputRef}
-							id="agent-chat-input"
-							name="agent-chat-input"
-							value={inputValue}
-							onChange={(e) => setInputValue(e.target.value)}
-							onKeyDown={handleKeyDown}
-							placeholder="Ask your email agent..."
-							rows={1}
-							aria-label="Chat message input"
-							className="flex-1 resize-none rounded-lg border border-kumo-line bg-kumo-control px-3 py-2 text-xs text-kumo-default placeholder:text-kumo-subtle focus:outline-none focus:ring-1 focus:ring-kumo-ring min-h-[36px] max-h-[100px]"
-							style={{ height: "auto", overflow: "hidden" }}
-							onInput={(e) => {
-								const t = e.target as HTMLTextAreaElement;
-								t.style.height = "auto";
-								t.style.height = `${Math.min(t.scrollHeight, 100)}px`;
-								t.style.overflow =
-									t.scrollHeight > 100 ? "auto" : "hidden";
-							}}
-						/>
-						<Button
-							variant="primary"
-							shape="square"
-							size="sm"
-							disabled={!inputValue.trim()}
-							icon={<ArrowUpIcon size={14} weight="bold" />}
-							onClick={handleSend}
-							aria-label="Send message"
-						/>
-					</div>
-				)}
+				<div className="flex items-end gap-1.5">
+					<textarea
+						ref={inputRef}
+						value={inputValue}
+						onChange={(e) => setInputValue(e.target.value)}
+						onKeyDown={handleKeyDown}
+						placeholder={t("agent.inputPlaceholder")}
+						rows={1}
+						disabled={isLoading}
+						className="flex-1 resize-none rounded-lg border border-kumo-line bg-kumo-control px-3 py-2 text-xs text-kumo-default placeholder:text-kumo-subtle focus:outline-none focus:ring-1 focus:ring-kumo-ring min-h-[36px] max-h-[100px]"
+					/>
+					<Button
+						variant="primary"
+						shape="square"
+						size="sm"
+						disabled={!inputValue.trim() || isLoading}
+						icon={<ArrowUpIcon size={14} weight="bold" />}
+						onClick={() => handleSend()}
+						aria-label={t("common.send")}
+					/>
+				</div>
 			</div>
 		</div>
-	);
-}
-
-export default function AgentPanel() {
-	const { mailboxId } = useParams<{ mailboxId: string }>();
-	const [hooks, setHooks] = useState<{
-		useAgent: typeof import("agents/react").useAgent;
-		useAgentChat: typeof import("@cloudflare/ai-chat/react").useAgentChat;
-	} | null>(null);
-
-	const [loadError, setLoadError] = useState<string | null>(null);
-
-	useEffect(() => {
-		Promise.all([
-			import("agents/react"),
-			import("@cloudflare/ai-chat/react"),
-		]).then(([a, c]) =>
-			setHooks({
-				useAgent: a.useAgent,
-				useAgentChat: c.useAgentChat,
-			}),
-		).catch((err) => {
-			console.error("Failed to load agent modules:", err);
-			setLoadError("Failed to connect to agent. Reload to retry.");
-		});
-	}, []);
-
-	if (loadError) {
-		return (
-			<div className="flex flex-col items-center justify-center h-full gap-2 px-4 text-center">
-				<span className="text-xs text-kumo-error">{loadError}</span>
-			</div>
-		);
-	}
-
-	if (!hooks) {
-		return (
-			<div className="flex flex-col items-center justify-center h-full gap-2">
-				<Loader size="base" />
-				<span className="text-xs text-kumo-subtle">
-					Connecting...
-				</span>
-			</div>
-		);
-	}
-
-	return (
-		<AgentChatConnected
-			mailboxId={mailboxId ?? "default"}
-			useAgent={hooks.useAgent}
-			useAgentChat={hooks.useAgentChat}
-		/>
 	);
 }

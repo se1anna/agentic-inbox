@@ -2,10 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-/**
- * Shared attachment storage logic.
- * Eliminates the triplicated atob → Uint8Array → R2.put pattern.
- */
 import type { Env } from "../types";
 
 export interface StoredAttachment {
@@ -16,16 +12,17 @@ export interface StoredAttachment {
 	size: number;
 	content_id: string | null;
 	disposition: string;
+	storage_key: string;
 }
 
 /**
- * Store base64-encoded attachments to R2 and return metadata for the DO.
+ * Store base64-encoded or raw attachments to R2 and return metadata for D1.
  */
 export async function storeAttachments(
 	bucket: Env["BUCKET"],
 	emailId: string,
 	attachments?: {
-		content: string;
+		content: string | Uint8Array | ArrayBuffer;
 		filename: string;
 		type: string;
 		disposition: string;
@@ -37,11 +34,19 @@ export async function storeAttachments(
 	const results: StoredAttachment[] = [];
 	for (const att of attachments) {
 		const attachmentId = crypto.randomUUID();
-		// Sanitize filename to prevent path traversal in R2 keys
 		const safeFilename = (att.filename || "untitled").replace(/[\/\\:*?"<>|\x00-\x1f]/g, "_");
 		const key = `attachments/${emailId}/${attachmentId}/${safeFilename}`;
-		const binaryStr = atob(att.content);
-		const bytes = Uint8Array.from(binaryStr, (c) => c.charCodeAt(0));
+
+		let bytes: Uint8Array;
+		if (typeof att.content === "string") {
+			const binaryStr = atob(att.content);
+			bytes = Uint8Array.from(binaryStr, (c) => c.charCodeAt(0));
+		} else if (att.content instanceof Uint8Array) {
+			bytes = att.content;
+		} else {
+			bytes = new Uint8Array(att.content);
+		}
+
 		await bucket.put(key, bytes);
 		results.push({
 			id: attachmentId,
@@ -50,7 +55,8 @@ export async function storeAttachments(
 			mimetype: att.type,
 			size: bytes.byteLength,
 			content_id: att.contentId || null,
-			disposition: att.disposition,
+			disposition: att.disposition || "attachment",
+			storage_key: key,
 		});
 	}
 	return results;

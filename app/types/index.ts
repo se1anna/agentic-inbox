@@ -20,7 +20,25 @@ export interface Mailbox {
 	id: string;
 	email: string;
 	name: string;
+	isDefault?: boolean;
 	settings?: MailboxSettings;
+}
+
+export interface UserProfile {
+	id: string;
+	email: string;
+	name: string;
+	role: string;
+	hasCustomAI?: boolean;
+	custom_ai_endpoint?: string;
+	custom_ai_model?: string;
+}
+
+export interface AISettings {
+	endpoint: string;
+	model: string;
+	hasKey: boolean;
+	maskedKey?: string;
 }
 
 export interface Email {
@@ -63,4 +81,5 @@ export interface Folder {
 	id: string;
 	name: string;
 	unreadCount: number;
+	is_deletable?: number;
 }

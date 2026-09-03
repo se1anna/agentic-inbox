@@ -7,8 +7,10 @@ import { GearSixIcon, ListIcon, MagnifyingGlassIcon, RobotIcon, XIcon } from "@p
 import { type KeyboardEvent, useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { useUIStore } from "~/hooks/useUIStore";
+import { useI18n } from "~/i18n";
 
 export default function Header() {
+	const { t } = useI18n();
 	const [searchQuery, setSearchQuery] = useState("");
 	const [isSearchExpanded, setIsSearchExpanded] = useState(false);
 	const { mailboxId } = useParams<{ mailboxId: string }>();
@@ -77,8 +79,8 @@ export default function Header() {
 				<div className="flex-1 relative flex items-center">
 					<Input
 						className="w-full"
-						aria-label="Search emails"
-						placeholder="Search emails... (try from:name, is:unread, has:attachment)"
+						aria-label={t("common.search")}
+						placeholder={t("emailList.searchPlaceholder")}
 						value={searchQuery}
 						onChange={(e) => setSearchQuery(e.target.value)}
 						onKeyDown={handleKeyDown}
@@ -94,13 +96,13 @@ export default function Header() {
 						</button>
 					)}
 				</div>
-				<Tooltip content="Search" side="bottom" asChild>
+				<Tooltip content={t("common.search")} side="bottom" asChild>
 					<Button
 						variant="ghost"
 						shape="square"
 						icon={<MagnifyingGlassIcon size={20} />}
 						onClick={performSearch}
-						aria-label="Search"
+						aria-label={t("common.search")}
 					/>
 				</Tooltip>
 			</div>
@@ -113,13 +115,13 @@ export default function Header() {
 					size="sm"
 					icon={<MagnifyingGlassIcon size={20} />}
 					onClick={() => setIsSearchExpanded(true)}
-					aria-label="Search"
+					aria-label={t("common.search")}
 					className="md:hidden shrink-0"
 				/>
 			)}
 
 			<div className="flex items-center gap-1 ml-auto shrink-0">
-				<Tooltip content={isAgentPanelOpen ? "Hide agent panel" : "Show agent panel"} side="bottom" asChild>
+				<Tooltip content={isAgentPanelOpen ? t("nav.hideAgent") : t("nav.showAgent")} side="bottom" asChild>
 					<Button
 						variant={isAgentPanelOpen ? "secondary" : "ghost"}
 						shape="square"
@@ -129,7 +131,7 @@ export default function Header() {
 						className="hidden lg:inline-flex"
 					/>
 				</Tooltip>
-				<Tooltip content="Settings" side="bottom" asChild>
+				<Tooltip content={t("nav.settings")} side="bottom" asChild>
 					<Button
 						variant={isSettingsActive ? "secondary" : "ghost"}
 						shape="square"
@@ -141,7 +143,7 @@ export default function Header() {
 									: `/mailbox/${mailboxId}/settings`,
 							)
 						}
-						aria-label="Settings"
+						aria-label={t("nav.settings")}
 					/>
 				</Tooltip>
 			</div>
